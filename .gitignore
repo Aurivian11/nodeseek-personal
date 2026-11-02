@@ -1,0 +1,5 @@
+node_modules/
+.DS_Store
+/*.png
+/dist/nodeseek-personal-[0-9]*.user.js
+/outputs/

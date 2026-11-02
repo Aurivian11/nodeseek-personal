@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NodeSeek 个人版 · 本地预览</title>
+<style>body{margin:0;background:#f3f6f4;color:#27312e;font:15px/1.7 system-ui,-apple-system,'PingFang SC',sans-serif}main{max-width:840px;margin:8vh auto;padding:30px}h1{font-size:30px;margin-bottom:6px}p{color:#68756d}.preview-card{background:#fff;border:1px solid #e1e7e3;padding:24px;border-radius:16px;margin-top:24px}a{color:#16835c}button{padding:9px 14px;border:1px solid #d8e1da;border-radius:8px;background:#fff;color:#27312e;cursor:pointer}.preview-tools{display:flex;flex-wrap:wrap;gap:9px}.user-card{margin-top:24px}small{color:#68756d}</style>
+</head><body>
+<main id="nsk-body"><small>本地演示 · 使用虚构联系人和模拟接口</small><h1>NodeSeek 个人版</h1><p>三个功能：自动签到、用户资料增强、聊天式私信。</p>
+<div class="preview-tools"><button id="preview-chat">打开私信窗口</button><button id="preview-theme">切换深浅色</button><button id="preview-narrow">手机宽度预览</button></div>
+<div class="preview-card"><strong>用户资料卡与徽章预览</strong><p class="author-info"><a href="/space/202">林间风</a></p><p>将鼠标停在用户名上，或按 Tab 聚焦，查看资料卡。</p><p>右下角可以签到和打开设置。此页的操作只使用模拟接口。</p></div>
+<div class="user-card"><div class="user-head"><a href="/space/101"><img src="/avatar/101.png" alt="" width="48" height="48"></a><div><a class="Username" href="/space/101">我的账号</a><div class="preview-user-icons">☑　⇄　⚙</div></div></div><div class="user-stat"><div class="stat-block"><div>♢ 等级 Lv 3</div><div>♧ 鸡腿 1234</div><div>▢ 星辰 18</div><div><a href="/notification">♧ 通知 0</a></div></div><div class="stat-block"><div>♢ 主题帖 42</div><div>▤ 评论数 256</div><div>◉ 粉丝 0</div><div>☆ 收藏 12</div></div></div></div>
+</main>
+<style>.user-card{background:#fff;border-radius:16px;padding:24px;width:330px;max-width:100%;box-sizing:border-box;box-shadow:0 3px 18px #27312e12}.user-head{display:flex;gap:18px;align-items:center;margin-bottom:22px}.user-head img{border-radius:8px}.Username{font-size:20px;font-weight:600;text-decoration:none;color:inherit}.preview-user-icons{color:#66736a}.user-stat{display:flex;gap:28px;border-radius:8px;background:#ffffdc;padding:13px 15px;font-size:15px}.stat-block{flex:1;white-space:nowrap;line-height:2}.user-stat a{color:inherit;text-decoration:none}body:has(.nsp-chat[open])>main{visibility:hidden}</style>
+<script>
+  const previewStore = new Map([['nsp:v1:settings',{autoSign:false,signMode:'random',profiles:true,badges:true,chat:true}]]);
+  function GM_getValue(key,fallback){return previewStore.has(key)?previewStore.get(key):fallback;}
+  function GM_setValue(key,value){previewStore.set(key,value);}
+  const people = {202:'林间风',303:'小满',404:'北岛',505:'系统通知'};
+  const demoFollowing = new Set();
+  const demoBlocked = new Set();
+  const date = (minutes) => new Date(Date.now()-minutes*60000).toISOString();
+  const demoMessages = [
+    {id:1,sender_id:202,receiver_id:101,sender_name:'林间风',receiver_name:'我的账号',content:'你好，之前提到的服务器测试结果整理好了吗？',created_at:date(42),viewed:true},
+    {id:2,sender_id:101,receiver_id:202,sender_name:'我的账号',receiver_name:'林间风',content:'整理好了，晚高峰的延迟也补上了。\n我把比较明显的差异记在了表格里。',created_at:date(39),viewed:true},
+    {id:3,sender_id:202,receiver_id:101,sender_name:'林间风',receiver_name:'我的账号',content:'收到，谢谢。这样看起来就清楚多了。',created_at:date(36),viewed:false},
+    {id:4,sender_id:303,receiver_id:101,sender_name:'小满',receiver_name:'我的账号',content:'周末的分享帖子已经更新啦。',created_at:date(75),viewed:true},
+    {id:5,sender_id:404,receiver_id:101,sender_name:'北岛',receiver_name:'我的账号',content:'好的，明天再联系。',created_at:date(122),viewed:true},
+    {id:6,sender_id:505,receiver_id:101,sender_name:'系统通知',receiver_name:'我的账号',content:'你的帖子已被收录，感谢分享。',created_at:date(20),viewed:true}
+  ];
+  window.fetch=async(value,init={})=>{
+    const url=new URL(value,location.href);
+    if(url.origin!==location.origin)throw new Error('演示禁止外部请求');
+    if(init.signal?.aborted)throw new DOMException('Aborted','AbortError');
+    const json=(data)=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
+    if(url.pathname==='/')return new Response('<div class="user-card"><a href="/space/101">我的账号</a><a href="/notification">通知</a></div>');
+    if(url.pathname.startsWith('/api/account/getInfo/')){const id=Number(url.pathname.split('/').pop());return json({success:true,detail:{member_name:people[id]||'演示用户',rank:5,created_at:'2024-12-01T09:00:00+08:00',nPost:32,nComment:480,coin:2500,stardust:64,fans:24,roles:[{display_text:'Dev'}],followed:demoFollowing.has(id)}});}
+    if(url.pathname==='/api/attendance')return json({success:true,message:'演示随机签到成功',gain:7});
+    if(url.pathname.startsWith('/api/fans/')){const body=JSON.parse(init.body);const id=body.followed_member_id;url.pathname.endsWith('/add')?demoFollowing.add(id):demoFollowing.delete(id);return json({success:true});}
+    if(url.pathname==='/api/block-list/list')return json({success:true,data:[...demoBlocked].map(id=>({block_member_id:id}))});
+    if(url.pathname.startsWith('/api/block-list/')){const body=JSON.parse(init.body);const id=body.block_member_id||Number(Object.keys(people).find(id=>people[id]===body.block_member_name));url.pathname.endsWith('/add')?demoBlocked.add(id):demoBlocked.delete(id);return json({success:true});}
+    if(url.pathname.endsWith('/list'))return json({success:true,msgArray:url.searchParams.get('page')==='1'?demoMessages:[]});
+    if(url.pathname.includes('/with/')){const id=Number(url.pathname.split('/').pop());return json({success:true,msgArray:demoMessages.filter(m=>m.sender_id===id||m.receiver_id===id),talkTo:{member_name:people[id]}});}
+    if(url.pathname.endsWith('/markViewed')){const ids=init.body?JSON.parse(init.body).messages:[];for(const row of demoMessages)if(url.searchParams.get('all')==='true'||ids.includes(row.id))row.viewed=true;return json({success:true});}
+    if(url.pathname.endsWith('/send')){const body=JSON.parse(init.body);const message={id:demoMessages.length+1,sender_id:101,receiver_id:body.receiverUid,sender_name:'我的账号',receiver_name:people[body.receiverUid],content:body.content,created_at:new Date().toISOString(),viewed:true};demoMessages.push(message);return json({success:true,data:message});}
+    return new Response('{}',{status:404});
+  };
+</script>
+<script src="/src/00-core.js"></script><script src="/src/15-profile-model.js"></script><script src="/src/18-profile-actions.js"></script><script src="/src/20-account.js"></script><script src="/src/25-badges.js"></script><script src="/src/28-inbox-entry.js"></script><script src="/src/30-messages.js"></script>
+<script>
+  NSP.initUI();for(const module of NSP.modules)module.start();
+  document.querySelector('.nsp-chat-top h2').textContent='消息 · 本地演示';
+  document.querySelector('#preview-chat').addEventListener('click',()=>NSP.openChat(202,'林间风'));
+  document.querySelector('#preview-theme').addEventListener('click',()=>document.body.classList.toggle('dark-layout'));
+  document.querySelector('#preview-narrow').addEventListener('click',()=>window.open('/preview?mobile=1','nsp-mobile','width=390,height=844'));
+  const previewView=new URLSearchParams(location.search).get('view');
+  if(previewView==='profile')document.querySelector('.author-info a').focus();
+  else if(previewView==='inbox')NSP.openChat();
+  else if(previewView==='badges'){
+    document.querySelector('.author-info').style.cssText='font-size:11px;line-height:19.5px';
+  }
+  else if(previewView!=='sidebar')NSP.openChat(202,'林间风');
+</script>
+</body></html>
