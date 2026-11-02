@@ -1,6 +1,6 @@
 {
   "name": "nodeseek-personal",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "description": "Personal NodeSeek userscript: attendance, profiles, and private messages only",
   "license": "MIT",
@@ -9,6 +9,10 @@
     "test": "node --test tests/security.test.cjs",
     "preview": "node tests/preview-server.cjs"
   },
-  "engines": { "node": "^22.22.2 || ^24.15.0 || >=26.0.0" },
-  "devDependencies": { "jsdom": "30.1.3" }
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
+  "devDependencies": {
+    "jsdom": "30.1.3"
+  }
 }

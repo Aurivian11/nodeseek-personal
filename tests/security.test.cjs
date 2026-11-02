@@ -999,3 +999,149 @@ test('The installed entry point starts when the forum DOM appears after initial 
   f.w.document.body.append(forum);
   await until(() => chatOpen(f) && currentPeer(f) === '联系人8', 'late forum markup must not leave the script permanently inactive');
 });
+
+test('The settings cache button preserves persistent values and invalidates late profile responses', async t => {
+  const old = deferred();
+  let calls = 0, oldSignal;
+  const saved = new Map([
+    ['nsp:v1:settings', { autoSign: false, profiles: true, chat: true }],
+    ['nsp:v1:migration:random-sign-v012', true],
+    ['nsp:v1:account:www.nodeseek.com:7:note:8', '保留备注'],
+    ['nsp:v1:account:www.nodeseek.com:7:sign:done', '2026-11-02']
+  ]);
+  const f = fixture(t, { files: ['20-account.js'], store: saved, settings: { profiles: true }, fetch: async (url, options) => {
+    calls++;
+    if (calls === 1) { oldSignal = options.signal; return old.promise; }
+    return json({ success: true, detail: completeProfile({ member_name: '新资料' }) });
+  } });
+  f.nsp.initUI(); f.nsp.modules.find(m => m.id === 'account').start();
+  const pending = f.nsp.getProfile(8).catch(error => error.message);
+  await until(() => calls === 1);
+  const before = structuredClone([...saved]);
+  f.nsp.openSettings();
+  f.w.document.querySelector('.nsp-clear-cache').click();
+  assert.equal(oldSignal.aborted, true);
+  assert.deepEqual([...saved], before);
+  assert.equal(f.w.document.querySelector('.nsp-settings').open, false);
+  assert.equal((await f.nsp.getProfile(8)).member_name, '新资料');
+  old.resolve(json({ success: true, detail: completeProfile({ member_name: '旧响应' }) }));
+  assert.match(await pending, /清理/);
+  assert.equal((await f.nsp.getProfile(8)).member_name, '新资料');
+  assert.equal(calls, 2, 'a cancelled old request cannot refill or evict the new cache');
+});
+
+test('Clearing private caches closes the panel, preserves drafts and rejects late threads without new requests', async t => {
+  const old = deferred();
+  let reads = 0, signal;
+  const f = chatFixture(t, async (pathname, options) => {
+    reads++;
+    assert.match(pathname, /\/with\/8$/);
+    if (reads === 1) { signal = options.signal; return old.promise; }
+    return json({ success: true, msgArray: [], talkTo: { member_name: '联系人8' } });
+  });
+  f.nsp.openChat(8, '联系人8');
+  await until(() => reads === 1);
+  writeMessage(f, '保留我的草稿');
+  const saved = structuredClone([...f.store]);
+  f.w.document.querySelector('.nsp-chat-clear-cache').click();
+  assert.equal(signal.aborted, true);
+  assert.equal(f.w.document.querySelector('.nsp-chat').open, false);
+  assert.equal(f.w.document.querySelectorAll('.nsp-chat-message,.nsp-chat-contact').length, 0);
+  old.resolve(json({ success: true, msgArray: [message(1, 8, '迟到消息不得恢复缓存')], talkTo: { member_name: '联系人8' } }));
+  await delay(20);
+  assert.equal(reads, 1, 'clearing must not fetch, send or mark messages read');
+  assert.deepEqual([...f.store], saved);
+  f.nsp.openChat(8);
+  assert.equal(f.w.document.querySelector('.nsp-chat-input').value, '保留我的草稿');
+  assert.doesNotMatch(f.w.document.querySelector('.nsp-chat-thread').textContent, /迟到消息/);
+  await until(() => reads === 2);
+});
+
+test('Cache clearing cannot interrupt an in-flight send or erase an unresolved-send guard', async t => {
+  const pending = deferred(); let sends = 0;
+  const f = chatFixture(t, async pathname => {
+    if (pathname.endsWith('/send')) { sends++; return pending.promise; }
+    return json({ success: true, msgArray: [], talkTo: { member_name: '联系人8' } });
+  });
+  f.nsp.openChat(8);
+  writeMessage(f, '发送结果待确认的草稿');
+  const send = f.w.document.querySelector('.nsp-chat-send');
+  await until(() => !send.disabled);
+  send.click();
+  await until(() => sends === 1);
+  assert.equal(f.nsp.clearCaches(), false);
+  assert.equal(f.w.document.querySelector('.nsp-chat').open, true);
+  pending.reject(new Error('网络中断'));
+  await until(() => !f.w.document.querySelector('.nsp-chat-warning').hidden);
+  assert.equal(f.nsp.clearCaches(), true);
+  f.nsp.openChat(8);
+  await until(() => !f.w.document.querySelector('.nsp-chat-heading button:last-child').disabled);
+  assert.equal(f.w.document.querySelector('.nsp-chat-input').value, '发送结果待确认的草稿');
+  assert.equal(send.disabled, true);
+  send.click();
+  assert.equal(sends, 1);
+});
+
+test('Conversation history keeps the newest 200 messages and marks only retained visible messages read', async t => {
+  const marked = []; let tail = 500;
+  const f = chatFixture(t, async (pathname, options) => {
+    if (pathname.endsWith('/markViewed')) { marked.push(JSON.parse(options.body).messages); return json({ success: true }); }
+    return json({ success: true, msgArray: Array.from({ length: tail }, (_, i) => message(i + 1, 8, `消息${i + 1}`, { viewed: false })), talkTo: { member_name: '联系人8' } });
+  });
+  f.nsp.openChat(8);
+  await until(() => marked.length === 1 && !f.w.document.querySelector('.nsp-chat-heading button:last-child').disabled);
+  assert.equal(f.w.document.querySelectorAll('.nsp-chat-message').length, 200);
+  assert.equal(f.w.document.querySelector('.nsp-chat-bubble').textContent, '消息301');
+  assert.deepEqual(marked[0], Array.from({ length: 200 }, (_, i) => i + 301));
+  tail = 501;
+  f.w.document.querySelector('.nsp-chat-heading button:last-child').click();
+  await until(() => marked.length === 2);
+  assert.equal(f.w.document.querySelectorAll('.nsp-chat-message').length, 200);
+  assert.equal(f.w.document.querySelector('.nsp-chat-bubble').textContent, '消息302');
+  assert.equal(f.w.document.querySelectorAll('.nsp-chat-bubble')[199].textContent, '消息501');
+});
+
+async function visitCachedPeers(f, count, rows) {
+  for (let i = 0; i < count; i++) {
+    f.nsp.openChat(100 + i);
+    await until(() => f.w.document.querySelectorAll('.nsp-chat-message').length === rows && !f.w.document.querySelector('.nsp-chat-heading button:last-child').disabled);
+  }
+}
+
+test('Private caches evict old conversations at both the total-message and conversation limits', async t => {
+  for (const [count, rows] of [[7, 200], [22, 1]]) {
+    let stalled = false;
+    const never = deferred();
+    const f = chatFixture(t, async pathname => {
+      if (stalled) return never.promise;
+      const peer = Number(pathname.split('/').pop());
+      return json({ success: true, msgArray: Array.from({ length: rows }, (_, i) => message(i + 1, peer, `会话${peer}消息${i}`)), talkTo: { member_name: `联系人${peer}` } });
+    });
+    await visitCachedPeers(f, count, rows);
+    stalled = true;
+    f.nsp.openChat(100);
+    assert.equal(f.w.document.querySelectorAll('.nsp-chat-message').length, 0, 'the oldest conversation must be evicted');
+    f.nsp.openChat(100 + count - 1);
+    assert.equal(f.w.document.querySelectorAll('.nsp-chat-message').length, rows, 'the recently used conversation remains cached');
+    f.nsp.clearCaches();
+    never.resolve(json({ success: true, msgArray: [], talkTo: { member_name: '迟到响应' } }));
+  }
+});
+
+test('The contact list has a fixed cap and cannot fetch unbounded older pages', async t => {
+  let lists = 0;
+  const f = fixture(t, { files: ['30-messages.js'], settings: { chat: true }, fetch: async url => {
+    assert.match(new URL(url).pathname, /\/list$/);
+    lists++;
+    return json({ success: true, msgArray: Array.from({ length: 250 }, (_, i) => message(i + 1, i + 100, '摘'.repeat(5000))) });
+  } });
+  f.nsp.initUI(); f.nsp.modules.find(m => m.id === 'messages').start(); f.nsp.openChat();
+  await until(() => f.w.document.querySelectorAll('.nsp-chat-contact').length === 200);
+  assert.equal(f.w.document.querySelector('.nsp-chat-contact .nsp-chat-preview').textContent.length, 300);
+  const more = f.w.document.querySelector('.nsp-chat-more');
+  assert.equal(more.disabled, true);
+  assert.match(more.textContent, /200/);
+  more.click();
+  await delay(10);
+  assert.equal(lists, 1);
+});

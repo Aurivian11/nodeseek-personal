@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NodeSeek 个人版
 // @namespace    local.nodeseek.personal
-// @version      0.1.6
+// @version      0.1.7
 // @description  只提供自动签到、用户资料卡和聊天式私信；本地配置，无远程依赖。
 // @homepageURL  https://github.com/Aurivian11/nodeseek-personal
 // @supportURL   https://github.com/Aurivian11/nodeseek-personal/issues
@@ -18,7 +18,7 @@
 
 (function () {
 'use strict';
-const NSP_VERSION = "0.1.6";
+const NSP_VERSION = "0.1.7";
 
 // Source: 00-core.js
 // Shared infrastructure. No remote libraries, external APIs, or page-context bridge.
@@ -208,6 +208,19 @@ const NSP = (() => {
     tools.append(control);
     return control;
   }
+  const cacheCleaners = new Map();
+  function registerCacheCleaner(clean, ready = () => true) {
+    cacheCleaners.set(clean, ready);
+  }
+  function clearCaches() {
+    if ([...cacheCleaners.values()].some(ready => !ready())) {
+      toast('消息操作正在进行，请等待结果确认后再清理缓存');
+      return false;
+    }
+    for (const clean of cacheCleaners.keys()) clean();
+    toast('缓存已清理；设置、备注、签到状态和未发送草稿已保留');
+    return true;
+  }
   function openSettings() {
     if (settingsDialog?.open) return;
     settingsDialog?.remove();
@@ -232,6 +245,9 @@ const NSP = (() => {
     }
     select.value = settings.signMode;
     modeRow.append(el('span', '', '签到奖励方式'), select); form.append(modeRow);
+    const cacheInfo = el('p', 'nsp-muted', '清理资料和私信内存缓存，保留设置、备注、签到状态和草稿。浏览器图片缓存由浏览器管理。');
+    const clear = button('一键清理缓存', () => { if (clearCaches()) dialog.close(); }, 'nsp-clear-cache');
+    form.append(cacheInfo, clear);
     const foot = el('div', 'nsp-settings-actions');
     const cancel = button('关闭', () => dialog.close());
     const save = el('button', 'nsp-primary', '保存并刷新'); save.type = 'submit';
@@ -274,7 +290,7 @@ const NSP = (() => {
     addTool('设置', openSettings);
     if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('NodeSeek 个人版设置', openSettings);
   }
-  return { version, modules: [], settings, store, el, button, css, safeURL, userFromDocument, getUser, api, observe, toast, addTool, initUI, openSettings };
+  return { version, modules: [], settings, store, el, button, css, safeURL, userFromDocument, getUser, api, observe, toast, addTool, initUI, openSettings, registerCacheCleaner, clearCaches };
 })();
 
 
@@ -573,6 +589,7 @@ NSP.modules.push({
     const pending = new Map();
     const queue = [];
     const profileTTL = 5 * 60_000;
+    let cacheGeneration = 0;
     let activeRequests = 0;
     function pump() {
       while (activeRequests < 2 && queue.length) {
@@ -580,7 +597,8 @@ NSP.modules.push({
         activeRequests++;
         (async () => {
           try {
-            const data = await NSP.api(`/api/account/getInfo/${job.id}`);
+            const data = await NSP.api(`/api/account/getInfo/${job.id}`, { signal: job.controller.signal });
+            if (job.generation !== cacheGeneration) throw new Error('资料缓存已清理');
             if (data?.success !== true || !data.detail || typeof data.detail !== 'object') {
               throw new Error(data?.message || '暂时无法读取资料');
             }
@@ -592,7 +610,7 @@ NSP.modules.push({
           } catch (error) {
             job.reject(error);
           } finally {
-            pending.delete(job.id);
+            if (pending.get(job.id) === job) pending.delete(job.id);
             activeRequests--;
             pump();
           }
@@ -620,7 +638,7 @@ NSP.modules.push({
       if (queue.length >= (priority === 'badge' ? 64 : 72)) return Promise.reject(new Error('资料请求较多，请稍后再试'));
       let resolve, reject;
       const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-      const job = { id, priority, promise, resolve, reject };
+      const job = { id, priority, promise, resolve, reject, generation: cacheGeneration, controller: new AbortController() };
       pending.set(id, job);
       const before = priority === 'hover' ? queue.findIndex(item => item.priority === 'badge') : -1;
       queue.splice(before < 0 ? queue.length : before, 0, job);
@@ -682,6 +700,15 @@ NSP.modules.push({
         returningFocus = false;
       }
     }
+    NSP.registerCacheCleaner(() => {
+      cacheGeneration++;
+      cache.clear();
+      for (const job of pending.values()) job.controller.abort();
+      for (const job of queue.splice(0)) job.reject(new Error('资料缓存已清理'));
+      pending.clear();
+      closeCard();
+      card.replaceChildren();
+    });
     function delayedClose() {
       clearTimeout(showTimer);
       clearTimeout(hideTimer);
@@ -1347,6 +1374,10 @@ NSP.modules.push({
     const messageId = row => validId(row.id);
     const latestId = row => row ? validId(row.max_id) || messageId(row) : null;
     const compareLatest = (left, right) => time(left) - time(right) || (latestId(left) || 0) - (latestId(right) || 0);
+    const contactSummary = row => ({
+      id: row.id, max_id: row.max_id, sender_id: row.sender_id, receiver_id: row.receiver_id,
+      created_at: row.created_at, viewed: row.viewed, content: row.content.slice(0, 300)
+    });
     const messageKey = row => messageId(row) ? `id:${row.id}` : JSON.stringify([
       row.sender_id, row.receiver_id, row.created_at, row.content
     ]);
@@ -1359,6 +1390,7 @@ NSP.modules.push({
     const contacts = new Map();
     const conversations = new Map();
     const confirmedThreads = new Set();
+    const cacheLimits = Object.freeze({ contacts: 200, conversations: 20, perConversation: 200, totalMessages: 1000 });
     let accountId = null;
     let activeId = null;
     let session = null;
@@ -1393,7 +1425,9 @@ NSP.modules.push({
     native.rel = 'noopener noreferrer';
     native.dataset.nspNative = 'true';
     const close = action('关闭', () => closePanel(), 'nsp-chat-close');
-    top.append(title, markAll, native, close);
+    const clear = action('清缓存', () => NSP.clearCaches(), 'nsp-chat-clear-cache');
+    clear.title = '清理缓存并关闭私信，保留设置、备注和草稿';
+    top.append(title, markAll, clear, native, close);
 
     const layout = ui('div', 'nsp-chat-layout');
     const sidebar = ui('aside', 'nsp-chat-sidebar');
@@ -1530,6 +1564,24 @@ NSP.modules.push({
       else drafts.delete(activeId);
     }
 
+    function trimCaches() {
+      const keep = [...contacts.values()].sort((a, b) => {
+        if (a.id === activeId) return -1;
+        if (b.id === activeId) return 1;
+        return compareLatest(b.latest || {}, a.latest || {});
+      }).slice(0, cacheLimits.contacts);
+      const kept = new Set(keep.map(person => person.id));
+      for (const id of contacts.keys()) if (!kept.has(id)) contacts.delete(id);
+      let total = [...conversations.values()].reduce((sum, rows) => sum + rows.length, 0);
+      for (const [id, rows] of conversations) {
+        if (conversations.size <= cacheLimits.conversations && total <= cacheLimits.totalMessages) break;
+        if (id === activeId) continue;
+        conversations.delete(id);
+        confirmedThreads.delete(id);
+        total -= rows.length;
+      }
+    }
+
     function checkedRows(result) {
       if (!result || result.success !== true) throw new Error(result?.message || '论坛未确认本次请求成功');
       if (!Array.isArray(result.msgArray)) throw new Error('消息接口格式不符，请使用原版私信');
@@ -1568,7 +1620,8 @@ NSP.modules.push({
       }
       if (!visible.length && !listBusy) contactList.append(ui('p', 'nsp-chat-empty', query ? '没有匹配的联系人' : '暂无私信。可从用户资料卡发起聊天。'));
       loadMore.hidden = !moreAvailable || !!query;
-      loadMore.disabled = listBusy;
+      loadMore.disabled = listBusy || contacts.size >= cacheLimits.contacts;
+      loadMore.textContent = contacts.size >= cacheLimits.contacts ? '已达 200 个联系人，请用原版查看更多' : '加载更多联系人';
       refreshList.disabled = listBusy;
     }
 
@@ -1752,11 +1805,12 @@ NSP.modules.push({
             ...old, id,
             name: hasName ? reportedName.trim() : old?.name || `用户 ${id}`,
             nameConfirmed: hasName || old?.nameConfirmed === true,
-            latest: useIncoming ? row : old.latest,
+            latest: useIncoming ? contactSummary(row) : old.latest,
             unread: useIncoming ? row.receiver_id === accountId && unread(row) : old.unread
           });
         }
-        const key = rows.map(messageKey).join('|');
+        trimCaches();
+        const key = rows.slice(0, cacheLimits.contacts).map(row => latestId(row) || messageKey(contactSummary(row))).join('|');
         moreAvailable = rows.length > 0 && !(more && key === lastPageKey);
         lastPageKey = key;
         page = requestedPage;
@@ -1793,7 +1847,8 @@ NSP.modules.push({
         );
         const all = new Map((conversations.get(id) || []).map(row => [messageKey(row), row]));
         rows.forEach(row => all.set(messageKey(row), row));
-        const messages = [...all.values()].sort((a, b) => time(a) - time(b) || Number(a.id || 0) - Number(b.id || 0));
+        const messages = [...all.values()].sort((a, b) => time(a) - time(b) || Number(a.id || 0) - Number(b.id || 0)).slice(-cacheLimits.perConversation);
+        conversations.delete(id);
         conversations.set(id, messages);
         const old = contacts.get(id) || { id, name: `用户 ${id}` };
         const reportedName = result.talkTo?.member_name;
@@ -1803,17 +1858,18 @@ NSP.modules.push({
         contacts.set(id, {
           ...old, name: hasName ? reportedName.trim() : old.name,
           nameConfirmed: hasName || old.nameConfirmed === true,
-          latest: useIncoming ? candidate : old.latest,
+          latest: useIncoming ? contactSummary(candidate) : old.latest,
           unread: useIncoming ? candidate.receiver_id === accountId && unread(candidate) : old.unread
         });
         confirmedThreads.add(id);
+        trimCaches();
         if (manual && failureAtStart && failures.get(id) === failureAtStart) failureAtStart.verified = true;
         threadStatus.textContent = contacts.get(id).nameConfirmed
-          ? '已同步最新记录' : '未能确认会话资料，请刷新记录或打开原版页面';
+          ? `已同步最新记录 · 本地每会话最多 ${cacheLimits.perConversation} 条，历史完整记录请看原版` : '未能确认会话资料，请刷新记录或打开原版页面';
         renderHeader();
         renderContacts();
         renderMessages(id, first);
-        const unreadIds = rows.filter(row => row.receiver_id === accountId && unread(row) && messageId(row)).map(row => Number(row.id));
+        const unreadIds = messages.filter(row => row.receiver_id === accountId && unread(row) && messageId(row)).map(row => Number(row.id));
         if (unreadIds.length && !document.hidden && current()) {
           try {
             const marked = await NSP.api(`${apiRoot}/markViewed`, { method: 'POST', body: { messages: unreadIds }, signal });
@@ -1853,6 +1909,7 @@ NSP.modules.push({
       threadBusy = false;
       activeId = Number(id);
       if (!contacts.has(activeId)) contacts.set(activeId, { id: activeId, name: String(name || `用户 ${activeId}`) });
+      trimCaches();
       dialog.classList.add('nsp-chat-has-peer');
       input.value = drafts.get(activeId) || '';
       lastRenderKey = '';
@@ -1931,6 +1988,9 @@ NSP.modules.push({
       contacts.clear();
       conversations.clear();
       confirmedThreads.clear();
+      lastRenderKey = '';
+      lastPageKey = '';
+      page = 0;
       input.value = '';
       search.value = '';
       contactList.replaceChildren();
@@ -2110,6 +2170,16 @@ NSP.modules.push({
     window.addEventListener('pageshow', () => { routeSuspended = false; scheduleRoute(); });
     NSP.openChat = (id, name) => openChat(id, name);
     NSP.hasDraft = () => !!input.value.trim() || [...drafts.values()].some(text => !!text.trim()) || sending.size > 0;
+    NSP.registerCacheCleaner(() => {
+      closePanel();
+      contacts.clear();
+      conversations.clear();
+      confirmedThreads.clear();
+      lastRenderKey = '';
+      lastPageKey = '';
+      thread.replaceChildren();
+      contactList.replaceChildren();
+    }, () => sending.size === 0 && !markAllBusy);
     NSP.addTool('私信', () => openChat());
 
     NSP.css(`
@@ -2134,7 +2204,7 @@ NSP.modules.push({
       .nsp-chat-main{background:var(--chat-main)}.nsp-chat-heading{min-height:60px}.nsp-chat-thread{padding:24px}.nsp-chat-message{flex-direction:row;align-items:flex-start;gap:10px;margin-bottom:22px}.nsp-chat-message .nsp-chat-monogram{width:36px;height:36px;border-radius:7px;font-size:17px}.nsp-chat-message-content{display:flex;align-items:flex-start;flex-direction:column;max-width:min(78%,720px);min-width:0}.nsp-chat-time{margin:6px 2px 0}.nsp-chat-bubble{max-width:100%;padding:10px 14px;border-radius:3px 10px 10px}.nsp-chat-mine{flex-direction:row-reverse}.nsp-chat-mine .nsp-chat-message-content{align-items:flex-end}.nsp-chat-mine .nsp-chat-bubble{border-radius:10px 3px 10px 10px;background:#b4f2cb;border-color:#b4f2cb;color:#24382c}.nsp-chat-composer{margin:0;border:0;border-top:1px solid var(--nsp-line,#e5e5e5);border-radius:0;padding:16px 24px 18px}.nsp-chat-input{min-height:82px}.nsp-chat button.nsp-chat-send{background:#269e52}
       .nsp-dark .nsp-chat{--chat-side:#252a30;--chat-main:#1c2127;--chat-search:#333a43}.nsp-dark .nsp-chat-search::placeholder{color:#9ba5b0}.nsp-dark .nsp-chat-mine .nsp-chat-bubble{background:#245f40;border-color:#30684b;color:#e1f6e8}.nsp-dark .nsp-chat a.nsp-chat-shortcut:hover,.nsp-dark .nsp-chat button.nsp-chat-contact:hover{background:#ffffff08}
       @media(min-width:1700px){.nsp-chat{max-width:1600px}.nsp-chat-layout{grid-template-columns:360px minmax(0,1fr)}}
-      @media(max-width:700px){.nsp-chat{width:100vw;height:100dvh;max-height:none;border-radius:0}.nsp-chat-top{height:54px;padding:0 12px;gap:14px}.nsp-chat-top h2{font-size:16px}.nsp-chat-top button,.nsp-chat-top .nsp-chat-native{font-size:12px}.nsp-chat-thread{padding:16px 12px}.nsp-chat-message-content{max-width:calc(100% - 54px)}.nsp-chat-bubble{padding:9px 12px}.nsp-chat-composer{padding:12px 12px max(12px,env(safe-area-inset-bottom))}.nsp-chat-input{min-height:64px}}
+      @media(max-width:700px){.nsp-chat{width:100vw;height:100dvh;max-height:none;border-radius:0}.nsp-chat-top{height:54px;padding:0 10px;gap:10px}.nsp-chat-top h2{font-size:16px}.nsp-chat-top button,.nsp-chat-top .nsp-chat-native{font-size:12px}.nsp-chat-thread{padding:16px 12px}.nsp-chat-message-content{max-width:calc(100% - 54px)}.nsp-chat-bubble{padding:9px 12px}.nsp-chat-composer{padding:12px 12px max(12px,env(safe-area-inset-bottom))}.nsp-chat-input{min-height:64px}}
     `);
     scheduleRoute();
   }
