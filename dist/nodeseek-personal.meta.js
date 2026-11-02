@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NodeSeek 个人版
 // @namespace    local.nodeseek.personal
-// @version      0.1.6
+// @version      0.1.7
 // @description  只提供自动签到、用户资料卡和聊天式私信；本地配置，无远程依赖。
 // @homepageURL  https://github.com/Aurivian11/nodeseek-personal
 // @supportURL   https://github.com/Aurivian11/nodeseek-personal/issues

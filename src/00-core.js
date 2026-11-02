@@ -185,6 +185,19 @@ const NSP = (() => {
     tools.append(control);
     return control;
   }
+  const cacheCleaners = new Map();
+  function registerCacheCleaner(clean, ready = () => true) {
+    cacheCleaners.set(clean, ready);
+  }
+  function clearCaches() {
+    if ([...cacheCleaners.values()].some(ready => !ready())) {
+      toast('消息操作正在进行，请等待结果确认后再清理缓存');
+      return false;
+    }
+    for (const clean of cacheCleaners.keys()) clean();
+    toast('缓存已清理；设置、备注、签到状态和未发送草稿已保留');
+    return true;
+  }
   function openSettings() {
     if (settingsDialog?.open) return;
     settingsDialog?.remove();
@@ -209,6 +222,9 @@ const NSP = (() => {
     }
     select.value = settings.signMode;
     modeRow.append(el('span', '', '签到奖励方式'), select); form.append(modeRow);
+    const cacheInfo = el('p', 'nsp-muted', '清理资料和私信内存缓存，保留设置、备注、签到状态和草稿。浏览器图片缓存由浏览器管理。');
+    const clear = button('一键清理缓存', () => { if (clearCaches()) dialog.close(); }, 'nsp-clear-cache');
+    form.append(cacheInfo, clear);
     const foot = el('div', 'nsp-settings-actions');
     const cancel = button('关闭', () => dialog.close());
     const save = el('button', 'nsp-primary', '保存并刷新'); save.type = 'submit';
@@ -251,5 +267,5 @@ const NSP = (() => {
     addTool('设置', openSettings);
     if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('NodeSeek 个人版设置', openSettings);
   }
-  return { version, modules: [], settings, store, el, button, css, safeURL, userFromDocument, getUser, api, observe, toast, addTool, initUI, openSettings };
+  return { version, modules: [], settings, store, el, button, css, safeURL, userFromDocument, getUser, api, observe, toast, addTool, initUI, openSettings, registerCacheCleaner, clearCaches };
 })();

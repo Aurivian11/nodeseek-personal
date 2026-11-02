@@ -151,6 +151,7 @@ NSP.modules.push({
     const pending = new Map();
     const queue = [];
     const profileTTL = 5 * 60_000;
+    let cacheGeneration = 0;
     let activeRequests = 0;
     function pump() {
       while (activeRequests < 2 && queue.length) {
@@ -158,7 +159,8 @@ NSP.modules.push({
         activeRequests++;
         (async () => {
           try {
-            const data = await NSP.api(`/api/account/getInfo/${job.id}`);
+            const data = await NSP.api(`/api/account/getInfo/${job.id}`, { signal: job.controller.signal });
+            if (job.generation !== cacheGeneration) throw new Error('资料缓存已清理');
             if (data?.success !== true || !data.detail || typeof data.detail !== 'object') {
               throw new Error(data?.message || '暂时无法读取资料');
             }
@@ -170,7 +172,7 @@ NSP.modules.push({
           } catch (error) {
             job.reject(error);
           } finally {
-            pending.delete(job.id);
+            if (pending.get(job.id) === job) pending.delete(job.id);
             activeRequests--;
             pump();
           }
@@ -198,7 +200,7 @@ NSP.modules.push({
       if (queue.length >= (priority === 'badge' ? 64 : 72)) return Promise.reject(new Error('资料请求较多，请稍后再试'));
       let resolve, reject;
       const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-      const job = { id, priority, promise, resolve, reject };
+      const job = { id, priority, promise, resolve, reject, generation: cacheGeneration, controller: new AbortController() };
       pending.set(id, job);
       const before = priority === 'hover' ? queue.findIndex(item => item.priority === 'badge') : -1;
       queue.splice(before < 0 ? queue.length : before, 0, job);
@@ -260,6 +262,15 @@ NSP.modules.push({
         returningFocus = false;
       }
     }
+    NSP.registerCacheCleaner(() => {
+      cacheGeneration++;
+      cache.clear();
+      for (const job of pending.values()) job.controller.abort();
+      for (const job of queue.splice(0)) job.reject(new Error('资料缓存已清理'));
+      pending.clear();
+      closeCard();
+      card.replaceChildren();
+    });
     function delayedClose() {
       clearTimeout(showTimer);
       clearTimeout(hideTimer);
