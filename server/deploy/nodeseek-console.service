@@ -1,0 +1,31 @@
+[Unit]
+Description=NodeSeek notification console
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=nodeseek-console
+Group=nodeseek-console
+WorkingDirectory=/opt/nodeseek-console
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/nodeseek-console/console.env
+ExecStart=/usr/bin/node --dns-result-order=ipv4first /opt/nodeseek-console/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+UMask=0077
+StateDirectory=nodeseek-console
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target
