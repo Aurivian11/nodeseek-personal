@@ -1,0 +1,34 @@
+[Unit]
+Description=Private Chrome desktop for NodeSeek
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=nodeseek-desktop
+Group=nodeseek-console
+WorkingDirectory=/opt/nodeseek-console
+Environment=LANG=C.UTF-8
+Environment=LANGUAGE=zh_CN
+ExecStart=/opt/nodeseek-console/deploy/start-desktop.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+KillSignal=SIGTERM
+UMask=0077
+RuntimeDirectory=nodeseek-desktop
+RuntimeDirectoryMode=0750
+StateDirectory=nodeseek-desktop
+StateDirectoryMode=0700
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+MemoryMax=650M
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

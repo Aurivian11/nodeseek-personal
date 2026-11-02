@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="same-origin">
+  <title>Chrome 远程桌面 · NodeSeek 通知台</title>
+  <link rel="stylesheet" href="/desktop.css">
+  <script type="module" src="/desktop.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">N</span><span>NodeSeek <strong>通知台</strong></span></a>
+    <a class="back-link" href="/">← 返回管理后台</a>
+  </header>
+  <main>
+    <section class="page-heading">
+      <div><p class="eyebrow">服务器上的独立浏览器</p><h1>Chrome 远程桌面</h1><p class="subtitle">在普通 Google Chrome 中，亲自完成登录与站点验证。</p></div>
+      <span class="standalone-badge">独立桌面</span>
+    </section>
+    <aside class="notice">
+      <strong>已支持浏览器桥接通知监控</strong>
+      <p>请保持此 Chrome 中的 NodeSeek 页面打开，桥接连接和登录状态会显示在管理后台。NodeSeek / Cloudflare 是否允许通过验证，由站点决定。</p>
+    </aside>
+    <section id="desktopWorkspace" class="desktop-workspace" aria-label="Chrome 远程桌面">
+      <div class="desktop-toolbar">
+        <div class="status-area"><span id="statusDot" class="status-dot idle" aria-hidden="true"></span><span id="connectionStatus" role="status" aria-live="polite">正在确认管理登录状态…</span></div>
+        <div class="toolbar-actions">
+          <button id="connectButton" class="button primary" type="button" disabled>连接桌面</button>
+          <button id="disconnectButton" class="button" type="button" disabled>断开连接</button>
+          <button id="fullscreenButton" class="button" type="button" disabled aria-label="全屏显示远程桌面">全屏</button>
+        </div>
+      </div>
+      <div id="desktopViewport" class="desktop-viewport">
+        <div id="rfbSurface" class="rfb-surface" aria-label="服务器浏览器交互画面"></div>
+        <div id="desktopPlaceholder" class="desktop-placeholder">
+          <svg class="desktop-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true"><rect x="8" y="11" width="48" height="34" rx="5"></rect><path d="M25 45v8m14-8v8M19 53h26M8 37h48"></path><circle cx="32" cy="41" r="1" fill="currentColor" stroke="none"></circle></svg>
+          <h2 id="placeholderTitle">桌面已准备好等待连接</h2>
+          <p id="placeholderDescription">点击「连接桌面」后，才会建立远程连接。</p>
+        </div>
+      </div>
+      <div class="desktop-footer"><span>点击远程画面后即可输入，验证码请自行操作。</span><span>1100 × 760 · 自动适应窗口</span></div>
+    </section>
+    <div class="notes">
+      <p><span class="small-dot" aria-hidden="true"></span>断开连接或关闭此网页，不会关闭服务器上的 Chrome。</p>
+      <p>本页不保存画面、按键或登录凭据。远程控制仅在连接期间生效。</p>
+    </div>
+  </main>
+</body>
+</html>

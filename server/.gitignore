@@ -1,0 +1,15 @@
+node_modules/
+data/
+.env
+.env.*
+!deploy/*.env.example
+*.sqlite*
+*.db*
+*.key
+admin.json
+profile/
+cache/
+imports/
+backups/
+qa/
+nodeseek-monitor-bridge.user.js
