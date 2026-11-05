@@ -80,7 +80,8 @@ test('initialization preserves existing valid keys and refuses invalid keys or n
  const bad=fixture(t);key(bad,31);let leaked='';
  assert.throws(()=>initialize(bad.config,{write:line=>{leaked+=line;}}),/32-byte/);
  assert.equal(leaked,'');assert.equal(fs.existsSync(path.join(bad.dataDir,'admin.json')),false);
- const publicDir=fixture(t);fs.mkdirSync(publicDir.dataDir,{mode:0o755});
+ // mkdir mode is filtered by the caller's umask; this rejection fixture must stay public.
+ const publicDir=fixture(t);fs.mkdirSync(publicDir.dataDir,{mode:0o755});fs.chmodSync(publicDir.dataDir,0o755);
  assert.throws(()=>initialize(publicDir.config,{write:()=>assert.fail('no password expected')}),/0700/);
  assert.equal(mode(publicDir.dataDir),0o755);
 });
@@ -124,7 +125,7 @@ test('template validation and atomic publication failures leave the previous fil
 });
 
 test('render refuses non-private output parents rather than changing a shared directory',t=>{
- const f=fixture(t);key(f);const dir=path.join(f.root,'shared');fs.mkdirSync(dir,{mode:0o755});
+ const f=fixture(t);key(f);const dir=path.join(f.root,'shared');fs.mkdirSync(dir,{mode:0o755});fs.chmodSync(dir,0o755);
  assert.throws(()=>renderBridge({env:f.env,output:path.join(dir,'bridge.user.js')}),/0700/);
  assert.equal(mode(dir),0o755);assert.deepEqual(fs.readdirSync(dir),[]);
 });
